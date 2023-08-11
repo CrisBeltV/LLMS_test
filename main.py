@@ -8,8 +8,8 @@ from rich.table import Table
 # Configuración de la base de datos
 server = '(localdb)\ServidorDemos'
 database = 'DB_LLMs_TEST'
-username = 'sa'
-password = '12345678'
+username = ''
+password = ''
 driver= '{ODBC Driver 17 for SQL Server}'
 
 connection = pyodbc.connect('DRIVER='+driver+';SERVER='+server+';DATABASE='+database+';UID='+username+';PWD='+ password)
