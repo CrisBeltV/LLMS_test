@@ -9,6 +9,11 @@ openai = "*"
 python-dotenv = "*"
 typer = "*"
 rich = "*"
+replicate = "*"
+streamlit = "*"
+accelerate = "*"
+pypyodbc = "*"
+pyodbc = "*"
 
 [dev-packages]
 
