@@ -30,43 +30,82 @@ def fetch_from_db():
 
 
 def get_table_schema_and_columns(table_name: str) -> dict:
-    cursor.execute(f"SELECT TABLE_SCHEMA, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{table_name}'")
+    cursor.execute(f"SELECT TABLE_SCHEMA, COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{table_name}'")
     columns = cursor.fetchall()
-    
+
     # Asumiendo que todos los registros tienen el mismo esquema para un nombre de tabla dado
     table_schema = columns[0].TABLE_SCHEMA if columns else None
-    
-    return {
-        "schema": table_schema,
-        "columns": [row.COLUMN_NAME for row in columns]
-    }
+
+    column_details = [
+        {"name": row.COLUMN_NAME, "type": row.DATA_TYPE} for row in columns
+    ]
+
+    return column_details
 
 
 
-def get_sql_from_prompt(prompt: str, table_name: str, table_columns: list) -> str:
+
+
+def get_sql_from_prompt(prompt: str, table_name: str, table_details: list) -> str:
     """Usa GPT-3 para obtener una consulta SQL a partir de un prompt."""
-    context_msg = f"La tabla {table_name} tiene las siguientes columnas: {', '.join(table_columns)}. Genera una consulta SQL Server basada en la descripción dada, genera unicamente la consulta no agreges ni comentarios ni mas textos ni saltos linea. Ten en cuenta que SQL Server no utiliza la cláusula LIMIT."
-    context_msg = f"Write a SQL query to retrieve information. The table name is {TABLENAME}, has the next columns:{', '.join(table_columns)}. And the schema is DBO. Give me the output in the next format:
-{
-QUERY: str,
-CONFINDENCE: 0-1,
-IS_CORRECT:bool 
-}"
+
+    #context_msg = f"La tabla {table_name} tiene las siguientes columnas: {', '.join(table_details)}. Genera una consulta SQL Server basada en la descripción dada, genera unicamente la consulta no agreges ni comentarios ni mas textos ni saltos linea. Ten en cuenta que SQL Server no utiliza la cláusula LIMIT."
+    #context_msg = f"Write a SQL query to retrieve information. The table name is {TABLENAME}, has the next columns:{', '.join(table_columns)}. And the schema is DBO. Give me the output in the next format:
+    #{
+    #QUERY: str,
+    #CONFINDENCE: 0-1,
+    #IS_CORRECT:bool 
+    #}"
+    print("flag")
+    print(table_details)
+    columns_detail = ', '.join([f"{col['name']} ({col['type']})" for col in table_details['columns']])
+    print(columns_detail)
+    
+    context_msg = (f"Estás trabajando con la tabla {table_details['schema']}.{table_name}, "
+                   f"la cual tiene las siguientes columnas: {columns_detail}."
+                   "Genera una consulta SQL Server basada en la descripción dada. "
+                   "Genera únicamente la consulta, sin comentarios, textos adicionales ni saltos de línea. "
+                   "Recuerda que SQL Server no utiliza la cláusula LIMIT.")
+    
+    
+    messages = [
+        {"role": "system", "content": context_msg},
+        {"role": "user", "content": prompt}
+    ]
+
+
+    
+    response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
+    result = extract_sql_from_response(response.choices[0].message.content)
+
+    return result
+
+
+
+def get_sql_from_prompt(prompt: str, table_name: str, table_details: list) -> str:
+    """Usa GPT-3 para obtener una consulta SQL a partir de un prompt."""
+
+    # Dado que table_details es ahora una lista, puedes crear directamente columns_detail
+    columns_detail = ', '.join([f"{col['name']} ({col['type']})" for col in table_details])
+
+    # Ahora, en la construcción del mensaje de contexto, ya no necesitas referenciar a ['columns'] o ['schema']
+    # (porque no existen en la lista). Sin embargo, si quieres agregar el esquema, tendrías que pasarlo 
+    # como un parámetro separado o hacer una suposición sobre él.
+
+    context_msg = (f"Estás trabajando con la tabla DBO.{table_name}, "  # Suponemos que el esquema es "DBO"
+                   f"la cual tiene las siguientes columnas: {columns_detail}."
+                   "Genera una consulta SQL Server basada en la descripción dada. "
+                   "Genera únicamente la consulta, sin comentarios, textos adicionales ni saltos de línea. "
+                   "Recuerda que SQL Server no utiliza la cláusula LIMIT.")
     
     messages = [
         {"role": "system", "content": context_msg},
         {"role": "user", "content": prompt}
     ]
     
-    print(f'prompt: {prompt}')
-    print(f'messages: {messages}')
-
-    
     response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-    print(f'prompt: {prompt}')
-    print(f'response: {response}')
     result = extract_sql_from_response(response.choices[0].message.content)
-    print(f'result:{result}')
+
     return result
 
 
@@ -128,15 +167,17 @@ def main():
             books_text = books_to_text(books)
             messages.append({"role": "assistant", "content": books_text})
         elif content == "prueba":
-            
-            
+            info_bookstore = get_table_schema_and_columns('BOOKSTORE')
+            print(info_bookstore)
+            break
         elif content.startswith("BOOKSTORE"):
             table_name = "BOOKSTORE"
-            table_columns = get_table_columns(table_name)
+            table_details = get_table_schema_and_columns(table_name)
+            
             prompt = content.replace("BOOKSTORE", "").strip()
-            sql_query = get_sql_from_prompt(prompt, table_name, table_columns)
+            sql_query = get_sql_from_prompt(prompt, table_name, table_details)
             print(sql_query)
-            print(table_columns)
+            print(table_details)
             print(prompt)
             
             if not sql_query:
