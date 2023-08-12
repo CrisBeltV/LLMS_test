@@ -4,6 +4,7 @@ import config
 import typer
 from rich import print
 from rich.table import Table
+import re
 
 # Configuración de la base de datos
 server = '(localdb)\ServidorDemos'
@@ -23,6 +24,71 @@ def fetch_from_db():
     return results
 
 
+#def get_table_columns(table_name: str) -> list:
+#    cursor.execute(f"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{table_name}'")
+#    return [row.COLUMN_NAME for row in cursor.fetchall()]
+
+
+def get_table_schema_and_columns(table_name: str) -> dict:
+    cursor.execute(f"SELECT TABLE_SCHEMA, COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{table_name}'")
+    columns = cursor.fetchall()
+    
+    # Asumiendo que todos los registros tienen el mismo esquema para un nombre de tabla dado
+    table_schema = columns[0].TABLE_SCHEMA if columns else None
+    
+    return {
+        "schema": table_schema,
+        "columns": [row.COLUMN_NAME for row in columns]
+    }
+
+
+
+def get_sql_from_prompt(prompt: str, table_name: str, table_columns: list) -> str:
+    """Usa GPT-3 para obtener una consulta SQL a partir de un prompt."""
+    context_msg = f"La tabla {table_name} tiene las siguientes columnas: {', '.join(table_columns)}. Genera una consulta SQL Server basada en la descripción dada, genera unicamente la consulta no agreges ni comentarios ni mas textos ni saltos linea. Ten en cuenta que SQL Server no utiliza la cláusula LIMIT."
+    context_msg = f"Write a SQL query to retrieve information. The table name is {TABLENAME}, has the next columns:{', '.join(table_columns)}. And the schema is DBO. Give me the output in the next format:
+{
+QUERY: str,
+CONFINDENCE: 0-1,
+IS_CORRECT:bool 
+}"
+    
+    messages = [
+        {"role": "system", "content": context_msg},
+        {"role": "user", "content": prompt}
+    ]
+    
+    print(f'prompt: {prompt}')
+    print(f'messages: {messages}')
+
+    
+    response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
+    print(f'prompt: {prompt}')
+    print(f'response: {response}')
+    result = extract_sql_from_response(response.choices[0].message.content)
+    print(f'result:{result}')
+    return result
+
+
+def extract_sql_from_response(response: str) -> str:
+    """Extrae la consulta SQL de una respuesta completa."""
+    match = re.search(r'SELECT.*FROM.*(?:WHERE.*?(?:SELECT.*FROM.*?)*?)?(?:ORDER BY.*?(?:ASC|DESC))?(?:LIMIT \d+)?;', response, re.DOTALL | re.IGNORECASE)
+    return match.group(0) if match else None
+
+def extract_sql_from_response(response: str) -> str:
+    """Extrae la consulta SQL de una respuesta completa."""
+    match = re.search(r'SELECT.*FROM.*(?:WHERE.*?(?:SELECT.*FROM.*?)*?)?(?:ORDER BY.*?(?:ASC|DESC))?(?:LIMIT\s*\d+)?;', response, re.DOTALL | re.IGNORECASE)
+    return match.group(0) if match else None
+
+
+def execute_sql(sql_query: str):
+    cursor.execute(sql_query)
+    results = []
+    for row in cursor:
+        results.append(row)
+    return results
+
+
 def main():
     openai.api_key = config.OPENAI_API_KEY
     print("💬 [bold green]ChatGPT API en Python[/bold green]")
@@ -31,12 +97,16 @@ def main():
     table.add_row("exit", "Salir de la aplicación")
     table.add_row("new", "Crear una nueva conversación")
     table.add_row("get_books", "Consulta en los libros de la base de datos")
+    table.add_row("BOOKSTORE table", "Busca en BOOKSTORE")
+    table.add_row("prueba", "Busca en BOOKSTORE")
+    
+    
     print(table)
 
     # Contexto del asistente
     context = {
         "role": "system",
-        "content": "Eres un asistente experto en promps, bases de datos y programación. y esta es tu base de datos"
+        "content": "Eres un asistente experto en promps, bases de datos y programación."
     }
     messages = [context]
 
@@ -53,9 +123,30 @@ def main():
         if content == "get_books":
             books = fetch_from_db()
             response_content = f"He encontrado {len(books)} libros en la base de datos: " + ", ".join([book[1] for book in books])
+            print(response_content)
             # Agregar los libros al contexto de mensajes
             books_text = books_to_text(books)
             messages.append({"role": "assistant", "content": books_text})
+        elif content == "prueba":
+            
+            
+        elif content.startswith("BOOKSTORE"):
+            table_name = "BOOKSTORE"
+            table_columns = get_table_columns(table_name)
+            prompt = content.replace("BOOKSTORE", "").strip()
+            sql_query = get_sql_from_prompt(prompt, table_name, table_columns)
+            print(sql_query)
+            print(table_columns)
+            print(prompt)
+            
+            if not sql_query:
+                print(f"[bold red]Error:[/bold red] No pude generar una consulta SQL válida.")
+                continue
+            
+            results = execute_sql(sql_query)
+            response_content = f"He encontrado {len(results)} resultados: " + ", ".join([str(result) for result in results])
+            print(response_content)
+
         else:
             messages.append({"role": "user", "content": content})
             response = openai.ChatCompletion.create(
