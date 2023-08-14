@@ -41,45 +41,6 @@ def get_table_schema_and_columns(table_name: str) -> dict:
     return column_details
 
 
-
-
-
-def get_sql_from_prompt(prompt: str, table_name: str, table_details: list) -> str:
-    """Usa GPT-3 para obtener una consulta SQL a partir de un prompt."""
-
-    #context_msg = f"La tabla {table_name} tiene las siguientes columnas: {', '.join(table_details)}. Genera una consulta SQL Server basada en la descripción dada, genera unicamente la consulta no agreges ni comentarios ni mas textos ni saltos linea. Ten en cuenta que SQL Server no utiliza la cláusula LIMIT."
-    #context_msg = f"Write a SQL query to retrieve information. The table name is {TABLENAME}, has the next columns:{', '.join(table_columns)}. And the schema is DBO. Give me the output in the next format:
-    #{
-    #QUERY: str,
-    #CONFINDENCE: 0-1,
-    #IS_CORRECT:bool 
-    #}"
-    print("flag")
-    print(table_details)
-    columns_detail = ', '.join([f"{col['name']} ({col['type']})" for col in table_details['columns']])
-    print(columns_detail)
-    
-    context_msg = (f"Estás trabajando con la tabla {table_details['schema']}.{table_name}, "
-                   f"la cual tiene las siguientes columnas: {columns_detail}."
-                   "Genera una consulta SQL Server basada en la descripción dada. "
-                   "Genera únicamente la consulta, sin comentarios, textos adicionales ni saltos de línea. "
-                   "Recuerda que SQL Server no utiliza la cláusula LIMIT.")
-    
-    
-    messages = [
-        {"role": "system", "content": context_msg},
-        {"role": "user", "content": prompt}
-    ]
-
-
-    
-    response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-    result = extract_sql_from_response(response.choices[0].message.content)
-
-    return result
-
-
-
 def get_sql_from_prompt(prompt: str, table_name: str, table_details: list) -> str:
     """Usa GPT-3 para obtener una consulta SQL a partir de un prompt."""
 
@@ -93,30 +54,33 @@ def get_sql_from_prompt(prompt: str, table_name: str, table_details: list) -> st
     context_msg = (f"Estás trabajando con la tabla DBO.{table_name}, "  # Suponemos que el esquema es "DBO"
                    f"la cual tiene las siguientes columnas: {columns_detail}."
                    "Genera una consulta SQL Server basada en la descripción dada. "
-                   "Genera únicamente la consulta, sin comentarios, textos adicionales ni saltos de línea. "
-                   "Recuerda que SQL Server no utiliza la cláusula LIMIT.")
+                   "Genera únicamente la consulta, sin comentarios, textos adicionales ni saltos de línea."
+                   "Recuerda que SQL Server no utiliza la cláusula LIMIT."
+                   "Tu respuesta sera igual a 'sql_query' y se ejecutara con 'cursor.execute(sql_query)'."
+                   """
+                    Este es un ejemplo correcto de una respuesta:
+                    SELECT * FROM tabla WHERE FECHA = (SELECT MIN(FECHA) FROM tabla) UNION SELECT * FROM tabla WHERE FECHA = (SELECT MAX(FECHA) tabla)
+                    Este es uno incorrecto
+                    SELECT TOP 1 * FROM tabla ORDER BY FECHA ASC UNION SELECT TOP 1 * FROM tabla ORDER BY FECHA DESC
+                   """)
     
-    messages = [
+    messagesCont = [
         {"role": "system", "content": context_msg},
         {"role": "user", "content": prompt}
     ]
-    
-    response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-    result = extract_sql_from_response(response.choices[0].message.content)
+
+    response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messagesCont)
+    print(response.choices[0].message.content)
+    # result = extract_sql_from_response(response.choices[0].message.content)
+    result = response.choices[0].message.content
 
     return result
 
 
 def extract_sql_from_response(response: str) -> str:
     """Extrae la consulta SQL de una respuesta completa."""
-    match = re.search(r'SELECT.*FROM.*(?:WHERE.*?(?:SELECT.*FROM.*?)*?)?(?:ORDER BY.*?(?:ASC|DESC))?(?:LIMIT \d+)?;', response, re.DOTALL | re.IGNORECASE)
-    return match.group(0) if match else None
-
-def extract_sql_from_response(response: str) -> str:
-    """Extrae la consulta SQL de una respuesta completa."""
     match = re.search(r'SELECT.*FROM.*(?:WHERE.*?(?:SELECT.*FROM.*?)*?)?(?:ORDER BY.*?(?:ASC|DESC))?(?:LIMIT\s*\d+)?;', response, re.DOTALL | re.IGNORECASE)
     return match.group(0) if match else None
-
 
 def execute_sql(sql_query: str):
     cursor.execute(sql_query)
@@ -125,9 +89,7 @@ def execute_sql(sql_query: str):
         results.append(row)
     return results
 
-
 def main():
-    
     openai.api_key = config.OPENAI_API_KEY
     os.environ["REPLICATE_API_TOKEN"] = config.LLAMA_REPLICATE_API_KEY
     
@@ -135,12 +97,12 @@ def main():
 
     table = Table("Comando", "Descripción")
     table.add_row("exit", "Salir de la aplicación")
+    table.add_row("new", "Crear una nueva conversación con GPT 3.5 🤖 💬")
     table.add_row("GPT3", "Crear una nueva conversación con GPT 3.5 🤖 💬")
     table.add_row("LLAMA2", "Crear una nueva conversación LLAMA 2 🦙 💬")
     table.add_row("Obtener_libros", "Consulta en la tabla  BOOKSTORE(libros de la base de datos)")
     table.add_row("Obtener_libros_x_Query", "Busca en la tabla BOOKSTORE por medio de consultas SQL")
 
-    
     print(table)
 
     # Contexto del asistente
@@ -151,48 +113,29 @@ def main():
     messages = [context]
 
     while True:
+        
         content = __prompt()
 
-        if content == "GPT3":
+        if content == "new":
             print("🆕 Nueva conversación creada")
             messages = [context]
             content = __prompt()
-            flag = 'GPT3'
-
-        elif content == "LLAMA2":
+        elif content.startswith("LLAMA2"):
             print("🆕 Nueva conversación creada 🦙 ")
             messages = [context]
             content = __prompt()
             # messages.append({"role": "user", "content": content})
             flag = 'LLAMA'
+            
+            output = replicate.run('a16z-infra/llama13b-v2-chat:df7690f1994d94e96ad9d568eac121aecf50684a0b0963b25a41cc40061269e5', # LLM model
+                                    input={"prompt": concatenated_content, # Prompts
+                                    "temperature":0.1, "top_p":0.9, "max_length":300, "repetition_penalty":1})  # Model parameters
+            response_content = ""
 
-        elif content == "Obtener_libros":
-            books = fetch_from_db()
-            print(books)
-            response_content = f"He encontrado {len(books)} libros en la base de datos: " + ", ".join([book[1] for book in books])
-            print(response_content)
-            # Agregar los libros al contexto de mensajes
-            books_text = books_to_text(books)
-            messages.append({"role": "assistant", "content": books_text})
-        elif content.startswith("Obtener_libros_x_Query"):
-            table_name = "BOOKSTORE"
-            table_details = get_table_schema_and_columns(table_name)
-            prompt = content.replace("BOOKSTORE", "").strip()
-            sql_query = get_sql_from_prompt(prompt, table_name, table_details)
-            if not sql_query:
-                print(f"[bold red]Error:[/bold red] No pude generar una consulta SQL válida.")
-                continue
-            results = execute_sql(sql_query)
-            response_content = f"He encontrado {len(results)} resultados: " + ", ".join([str(result) for result in results])
-            
-            
-        if flag == 'LLAMA':
-            print(f"Content:{content}")
-            print(f"Messages1:")
-            print(messages)
+            for item in output:
+                response_content += item
+                
             messages.append({"role": "user", "content": content})
-            print(f"Messages2:")
-            print(messages)
             # Concatenar los valores de 'content'
             concatenated_content = '\n'.join([f"{message['role']}: {message['content']}" for message in messages])
             print(f"concatenated_content:{concatenated_content}")
@@ -203,26 +146,54 @@ def main():
             response_content = ""
 
             for item in output:
-                response_content += item
+                response_content += item    
+                
+            
+        elif content == "Obtener_libros":
+            flag = 'GPT3'
+            books = fetch_from_db()
+            response_content = f"He encontrado {len(books)} libros en la base de datos: " + ", ".join([book[1] for book in books])
+            # Agregar los libros al contexto de mensajes
+            books_text = books_to_text(books)
+            messages.append({"role": "assistant", "content": books_text})
+            #response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
+            #response_content = response.choices[0].message.content
+            messages.append({"role": "assistant", "content": response_content})
+
+        elif content.startswith("Obtener_libros_x_Query"):
+            flag = 'QUERY'
+            table_name = "BOOKSTORE"
+            table_details = get_table_schema_and_columns(table_name)
+            prompt = content.replace("Obtener_libros_x_Query", "").strip()
+            messages.append({"role": "user", "content": prompt})
+            print(f"prompt:{prompt}")
+            sql_query = get_sql_from_prompt(prompt, table_name, table_details)
+            print(f"sql_query:{sql_query}")
+
+            if not sql_query:
+                print(f"[bold red]Error:[/bold red] No pude generar una consulta SQL válida.")
+                continue
+            results = execute_sql(sql_query)
+            response_content = f"He encontrado {len(results)} resultados: " + ", ".join([str(result) for result in results])
+            messages.append({"role": "assistant", "content": response_content})
         else:
-            messages.append({"role": "user", "content": content})
-            # Generate LLM response
-            response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
-            
-            response_content = response.choices[0].message.content
+                print("🆕 Nueva conversación creada")
+                messages.append({"role": "user", "content": content})
+
+                response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
+                response_content = response.choices[0].message.content
+                messages.append({"role": "assistant", "content": response_content})
             
         
-        messages.append({"role": "assistant", "content": response_content})
+        print(f"messages:[blue]{messages}[/blue]")
         print(f"[bold green]> [/bold green] [green]{response_content}[/green]")
-        
+
 
 def books_to_text(books):
     text = "Los libros en la base de datos son:\n"
     for book in books:
         text += f"- Título: {book[1]}, Autor: {book[2]}, Fecha de Publicación: {book[3]}, Descripción: {book[4]}, Estado: {book[5]}\n"
     return text
-
-
 
 def __prompt() -> str:
     prompt = typer.prompt("\n¿Sobre qué quieres hablar? ")
