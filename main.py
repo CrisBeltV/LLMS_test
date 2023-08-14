@@ -5,6 +5,9 @@ import typer
 from rich import print
 from rich.table import Table
 import re
+import replicate
+import os
+
 
 # Configuración de la base de datos
 server = '(localdb)\ServidorDemos'
@@ -22,11 +25,6 @@ def fetch_from_db():
     for row in cursor:
         results.append(row)
     return results
-
-
-#def get_table_columns(table_name: str) -> list:
-#    cursor.execute(f"SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = '{table_name}'")
-#    return [row.COLUMN_NAME for row in cursor.fetchall()]
 
 
 def get_table_schema_and_columns(table_name: str) -> dict:
@@ -129,75 +127,94 @@ def execute_sql(sql_query: str):
 
 
 def main():
+    
     openai.api_key = config.OPENAI_API_KEY
+    os.environ["REPLICATE_API_TOKEN"] = config.LLAMA_REPLICATE_API_KEY
+    
     print("💬 [bold green]ChatGPT API en Python[/bold green]")
 
     table = Table("Comando", "Descripción")
     table.add_row("exit", "Salir de la aplicación")
-    table.add_row("new", "Crear una nueva conversación")
-    table.add_row("get_books", "Consulta en los libros de la base de datos")
-    table.add_row("BOOKSTORE table", "Busca en BOOKSTORE")
-    table.add_row("prueba", "Busca en BOOKSTORE")
-    
+    table.add_row("GPT3", "Crear una nueva conversación con GPT 3.5 🤖 💬")
+    table.add_row("LLAMA2", "Crear una nueva conversación LLAMA 2 🦙 💬")
+    table.add_row("Obtener_libros", "Consulta en la tabla  BOOKSTORE(libros de la base de datos)")
+    table.add_row("Obtener_libros_x_Query", "Busca en la tabla BOOKSTORE por medio de consultas SQL")
+
     
     print(table)
 
     # Contexto del asistente
     context = {
         "role": "system",
-        "content": "Eres un asistente experto en promps, bases de datos y programación."
+        "content": "Eres un asistente experto en promps, bases de datos y programación. Solo respondes una vez como 'Asistente'"
     }
     messages = [context]
 
     while True:
         content = __prompt()
 
-        if content == "new":
+        if content == "GPT3":
             print("🆕 Nueva conversación creada")
             messages = [context]
             content = __prompt()
-        
-        # Nuevo: comprobar si el usuario quiere obtener libros
+            flag = 'GPT3'
 
-        if content == "get_books":
+        elif content == "LLAMA2":
+            print("🆕 Nueva conversación creada 🦙 ")
+            messages = [context]
+            content = __prompt()
+            # messages.append({"role": "user", "content": content})
+            flag = 'LLAMA'
+
+        elif content == "Obtener_libros":
             books = fetch_from_db()
+            print(books)
             response_content = f"He encontrado {len(books)} libros en la base de datos: " + ", ".join([book[1] for book in books])
             print(response_content)
             # Agregar los libros al contexto de mensajes
             books_text = books_to_text(books)
             messages.append({"role": "assistant", "content": books_text})
-        elif content == "prueba":
-            info_bookstore = get_table_schema_and_columns('BOOKSTORE')
-            print(info_bookstore)
-            break
-        elif content.startswith("BOOKSTORE"):
+        elif content.startswith("Obtener_libros_x_Query"):
             table_name = "BOOKSTORE"
             table_details = get_table_schema_and_columns(table_name)
-            
             prompt = content.replace("BOOKSTORE", "").strip()
             sql_query = get_sql_from_prompt(prompt, table_name, table_details)
-            print(sql_query)
-            print(table_details)
-            print(prompt)
-            
             if not sql_query:
                 print(f"[bold red]Error:[/bold red] No pude generar una consulta SQL válida.")
                 continue
-            
             results = execute_sql(sql_query)
             response_content = f"He encontrado {len(results)} resultados: " + ", ".join([str(result) for result in results])
-            print(response_content)
+            
+            
+        if flag == 'LLAMA':
+            print(f"Content:{content}")
+            print(f"Messages1:")
+            print(messages)
+            messages.append({"role": "user", "content": content})
+            print(f"Messages2:")
+            print(messages)
+            # Concatenar los valores de 'content'
+            concatenated_content = '\n'.join([f"{message['role']}: {message['content']}" for message in messages])
+            print(f"concatenated_content:{concatenated_content}")
+            # Generate LLM response
+            output = replicate.run('a16z-infra/llama13b-v2-chat:df7690f1994d94e96ad9d568eac121aecf50684a0b0963b25a41cc40061269e5', # LLM model
+                                    input={"prompt": concatenated_content, # Prompts
+                                    "temperature":0.1, "top_p":0.9, "max_length":300, "repetition_penalty":1})  # Model parameters
+            response_content = ""
 
+            for item in output:
+                response_content += item
         else:
             messages.append({"role": "user", "content": content})
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo", messages=messages)
+            # Generate LLM response
+            response = openai.ChatCompletion.create(model="gpt-3.5-turbo", messages=messages)
+            
             response_content = response.choices[0].message.content
-
+            
+        
         messages.append({"role": "assistant", "content": response_content})
         print(f"[bold green]> [/bold green] [green]{response_content}[/green]")
-
-
+        
 
 def books_to_text(books):
     text = "Los libros en la base de datos son:\n"

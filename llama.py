@@ -1,26 +1,23 @@
-from transformers import AutoTokenizer
-import transformers
-import torch
+import os
+import replicate
+import config
 
-model = "meta-llama/Llama-2-7b-chat-hf"
+os.environ["REPLICATE_API_TOKEN"] = config.LLAMA_REPLICATE_API_KEY
 
-tokenizer = AutoTokenizer.from_pretrained(model)
-pipeline = transformers.pipeline(
+
+# Prompts
+pre_prompt = "Eres un asistente útil. No responde como 'Usuario' ni pretende ser 'Usuario'. Solo respondes una vez como 'Asistente'"
+prompt_input = "¿Qué es Streamlit?"
+
+# Generate LLM response
+output = replicate.run('a16z-infra/llama13b-v2-chat:df7690f1994d94e96ad9d568eac121aecf50684a0b0963b25a41cc40061269e5', # LLM model
+                        input={"prompt": f"{pre_prompt} {prompt_input} Assistant: ", # Prompts
+                        "temperature":0.1, "top_p":0.9, "max_length":300, "repetition_penalty":1})  # Model parameters
     
-    
-    "text-generation",
-    model=model,
-    torch_dtype=torch.float16,
-    device_map="auto",
-)
 
-sequences = pipeline(
-    'I liked "Breaking Bad" and "Band of Brothers". Do you have any recommendations of other shows I might like?\n',
-    do_sample=True,
-    top_k=10,
-    num_return_sequences=1,
-    eos_token_id=tokenizer.eos_token_id,
-    max_length=200,
-)
-for seq in sequences:
-    print(f"Result: {seq['generated_text']}")
+full_response = ""
+
+for item in output:
+    full_response += item
+
+print(full_response)
